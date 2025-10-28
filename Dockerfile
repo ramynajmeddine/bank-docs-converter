@@ -1,12 +1,16 @@
 # Use a slim Python image
 FROM python:3.11-slim
 
-# Install LibreOffice, Unoconv, and fonts
+# Install LibreOffice (with full filters) and required dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libreoffice \
+    libreoffice-calc \
+    libreoffice-writer \
+    libreoffice-impress \
+    libreoffice-draw \
     fonts-dejavu \
+    openjdk-17-jre-headless \
     poppler-utils \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
@@ -27,4 +31,5 @@ EXPOSE 8080
 
 # Run FastAPI
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "info"]
+
 
