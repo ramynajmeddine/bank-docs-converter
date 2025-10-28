@@ -1,9 +1,8 @@
-from fastapi import FastAPI, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+import os
 import tempfile
 import subprocess
-import os
-from pathlib import Path
+from fastapi import FastAPI, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
 
 app = FastAPI()
 
@@ -13,51 +12,43 @@ def root():
 
 @app.post("/convert")
 async def convert(pdf: UploadFile, format: str = "xlsx"):
-    # Create a temporary working directory
-    temp_dir = Path(tempfile.mkdtemp())
-    input_path = temp_dir / "statement.pdf"
+    try:
+        # Create a temporary working directory
+        temp_dir = tempfile.mkdtemp()
+        input_path = os.path.join(temp_dir, "statement.pdf")
+        output_path = os.path.join(temp_dir, f"statement.{format}")
 
-    # Save uploaded PDF file
-    with open(input_path, "wb") as f:
-        f.write(await pdf.read())
+        # Save uploaded PDF
+        with open(input_path, "wb") as f:
+            f.write(await pdf.read())
 
-    # Check if LibreOffice exists
-    if os.system("which libreoffice") != 0:
-        return JSONResponse(
-            status_code=500,
-            content={"error": "LibreOffice not found on system"}
-        )
+        # Check if LibreOffice is available
+        if os.system("which libreoffice") != 0:
+            return JSONResponse(status_code=500, content={"error": "LibreOffice not found"})
 
-    # Convert the PDF using LibreOffice
-    output_dir = "/app"
-    command = [
-        "libreoffice",
-        "--headless",
-        "--convert-to", format,
-        "--outdir", output_dir,
-        str(input_path)
-    ]
+        # Convert PDF using LibreOffice
+        command = [
+            "libreoffice",
+            "--headless",
+            "--convert-to", format,
+            "--outdir", temp_dir,
+            input_path
+        ]
 
-    process = subprocess.run(command, capture_output=True, text=True)
+        process = subprocess.run(command, capture_output=True, text=True)
 
-    if process.returncode != 0:
-        return JSONResponse(
-            status_code=500,
-            content={
+        if process.returncode != 0:
+            return JSONResponse(status_code=500, content={
                 "error": "Conversion failed",
                 "details": process.stderr
-            }
-        )
+            })
 
-    # Determine converted file path inside /app
-    converted_filename = f"{Path(input_path).stem}.{format}"
-    converted_path = Path(output_dir) / converted_filename
+        # Check output file actually exists
+        if not os.path.exists(output_path):
+            return JSONResponse(status_code=500, content={"error": "Converted file not found"})
 
-    if not converted_path.exists():
-        return JSONResponse(
-            status_code=500,
-            content={"error": "Converted file not found"}
-        )
+        # Return converted file
+        return FileResponse(output_path, filename=f"converted.{format}")
 
-    # Return the converted file
-    return FileResponse(converted_path, filename=f"converted.{format}")
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
