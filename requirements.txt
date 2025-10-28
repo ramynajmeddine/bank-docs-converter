@@ -3,6 +3,7 @@ uvicorn[standard]
 python-multipart
 pandas
 openpyxl
-pdfplumber
-camelot-py[cv]
-ghostscript
+pytesseract
+opencv-python-headless
+Pillow
+pdf2image
