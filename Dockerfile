@@ -1,26 +1,30 @@
-# Use a slim image with Python
+# Use a slim Python image
 FROM python:3.11-slim
 
-# Install LibreOffice & utilities
+# Install LibreOffice, Unoconv, and fonts
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libreoffice \
+    unoconv \
     fonts-dejavu \
     poppler-utils \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Create app dir
+# Set working directory
 WORKDIR /app
 
-# Copy requirements first (better caching)
+# Copy dependencies first (for Docker cache efficiency)
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the app code
+# Copy app source
 COPY main.py /app/main.py
 
-# Expose the web port Railway expects
+# Ensure /tmp exists and is writable (Render uses ephemeral FS)
+RUN mkdir -p /tmp && chmod -R 777 /tmp
+
+# Set environment variables
 ENV PORT=8080
 EXPOSE 8080
 
-# Start the API
+# Run FastAPI
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "info"]
