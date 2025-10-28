@@ -1,29 +1,28 @@
-# Use Debian Bullseye base with Python 3.11
-FROM python:3.11-bullseye
+# Use Ubuntu base to get full LibreOffice filters
+FROM ubuntu:22.04
 
-# Install LibreOffice (full) and required dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libreoffice \
-    libreoffice-calc \
-    libreoffice-writer \
-    fonts-dejavu \
-    openjdk-17-jre-headless \
-    poppler-utils \
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install Python, LibreOffice (with Calc) and dependencies
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip libreoffice libreoffice-calc \
+    openjdk-17-jre-headless fonts-dejavu poppler-utils \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Create app dir
+# Set up working directory
 WORKDIR /app
 
 # Copy requirements first (for caching)
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the app code
+# Copy app code
 COPY main.py /app/main.py
 
-# Expose the web port Render expects
+# Expose Render port
 ENV PORT=8080
 EXPOSE 8080
 
-# Start the FastAPI server
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080", "--log-level", "info"]
+# Run API
+CMD ["python3", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]
