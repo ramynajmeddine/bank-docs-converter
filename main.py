@@ -13,42 +13,63 @@ def root():
 
 @app.post("/convert")
 async def convert(pdf: UploadFile, format: str = "xlsx"):
+    import re
     try:
         tmp_dir = tempfile.mkdtemp()
         input_path = os.path.join(tmp_dir, pdf.filename)
         output_filename = os.path.splitext(pdf.filename)[0] + f".{format}"
         output_path = os.path.join(tmp_dir, output_filename)
 
-        # Save uploaded file
         with open(input_path, "wb") as f:
             f.write(await pdf.read())
 
-        # Extract text line by line using pdfplumber
-        data_rows = []
-        with pdfplumber.open(input_path) as pdf_doc:
-            for page in pdf_doc.pages:
-                lines = page.extract_text().split('\n')
-                for line in lines:
-                    clean_line = line.strip()
-                    if clean_line:
-                        data_rows.append([clean_line])
+        # --- OCR phase ---
+        from pdf2image import convert_from_path
+        import pytesseract
 
-        if not data_rows:
-            return JSONResponse(status_code=400, content={"error": "No readable text detected in PDF."})
+        images = convert_from_path(input_path)
+        all_text = []
+        for img in images:
+            page_text = pytesseract.image_to_string(img)
+            all_text.append(page_text)
+        text = "\n".join(all_text)
 
-        # Convert text lines to a DataFrame
-        df = pd.DataFrame(data_rows, columns=["Extracted Text"])
+        # --- Parsing phase ---
+        lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
 
-        # Save to Excel
+        # typical date formats: 01 Jan, 12/02, 12 Feb 2024 etc.
+        date_pattern = r"^(?:\d{1,2}[ /-](?:\d{1,2}|[A-Za-z]{3,9})(?:[ /-]\d{2,4})?)"
+        transactions = []
+
+        for line in lines:
+            if re.match(date_pattern, line):
+                parts = re.split(r"\s{2,}|\t", line)
+                date = parts[0]
+                if len(parts) > 2:
+                    desc = " ".join(parts[1:-1])
+                    amount = parts[-1]
+                elif len(parts) == 2:
+                    desc, amount = parts[1], ""
+                else:
+                    desc, amount = line, ""
+                transactions.append([date, desc, amount])
+
+        # fallback if nothing matched
+        if not transactions:
+            for line in lines:
+                tokens = line.split()
+                if tokens:
+                    transactions.append(tokens)
+
+        # --- Save to Excel ---
+        import pandas as pd
+        df = pd.DataFrame(transactions, columns=["Date", "Description", "Amount"])
         df.to_excel(output_path, index=False)
-
-        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-            return JSONResponse(status_code=500, content={"error": "Excel file not created properly."})
 
         return FileResponse(
             output_path,
             filename=output_filename,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 
     except Exception as e:
