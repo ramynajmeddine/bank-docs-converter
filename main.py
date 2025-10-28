@@ -49,17 +49,20 @@ async def convert_pdf_to_excel(
         # Create a DataFrame
         df = pd.DataFrame(extracted_text)
 
-        # Write to Excel
-        df.to_excel(output_path, index=False)
+        # Write to Excel safely
+        df.to_excel(output_path, index=False, engine='openpyxl')
 
-        # Clean up input file after conversion
-        os.remove(input_path)
+        # Close all file handles before returning
+        del df
 
-        # Return Excel file
-        return FileResponse(output_path, filename=os.path.basename(output_path))
+        # Double-check file exists and has size
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            raise Exception("Output Excel file was not created correctly.")
 
-    except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"error": f"Conversion failed: {str(e)}"}
+        # Return as a downloadable response
+        return FileResponse(
+            path=output_path,
+            filename=os.path.basename(output_path),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
