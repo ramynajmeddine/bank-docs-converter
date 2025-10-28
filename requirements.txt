@@ -3,7 +3,8 @@ uvicorn[standard]
 python-multipart
 pandas
 openpyxl
-pytesseract
-opencv-python-headless
-Pillow
 pdf2image
+pytesseract
+Pillow
+opencv-python-headless
+pdfplumber
