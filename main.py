@@ -1,6 +1,8 @@
+import tempfile
 import os
-import subprocess
-from fastapi import FastAPI, UploadFile
+import pdfplumber
+import openpyxl
+from fastapi import FastAPI, UploadFile, Form
 from fastapi.responses import FileResponse, JSONResponse
 
 app = FastAPI()
@@ -10,52 +12,31 @@ def root():
     return {"status": "OK", "message": "Bank Docs Converter is running"}
 
 @app.post("/convert")
-async def convert(pdf: UploadFile, format: str = "xlsx"):
+async def convert_pdf(pdf: UploadFile, format: str = Form("xlsx")):
     try:
-        # Use a writable directory inside the app folder
-        temp_dir = "/app/tmp"
-        os.makedirs(temp_dir, exist_ok=True)
-        input_path = os.path.join(temp_dir, "statement.pdf")
-        output_path = os.path.join(temp_dir, f"statement.{format}")
-
-        # Save uploaded PDF
+        # Save uploaded PDF to a temp file
+        temp_dir = tempfile.mkdtemp()
+        input_path = os.path.join(temp_dir, pdf.filename)
         with open(input_path, "wb") as f:
             f.write(await pdf.read())
 
-        # Check if LibreOffice exists
-        if os.system("which libreoffice") != 0:
-            return JSONResponse(status_code=500, content={"error": "LibreOffice not found"})
+        # Extract tables from PDF using pdfplumber
+        output_path = os.path.join(temp_dir, f"converted.{format}")
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
 
-        # Run LibreOffice conversion
-        command = [
-            "libreoffice",
-            "--headless",
-            "--convert-to", format,
-            "--outdir", temp_dir,
-            input_path
-        ]
-        process = subprocess.run(command, capture_output=True, text=True)
+        with pdfplumber.open(input_path) as pdf_file:
+            row_index = 1
+            for page in pdf_file.pages:
+                tables = page.extract_tables()
+                for table in tables:
+                    for row in table:
+                        for col_index, cell in enumerate(row, start=1):
+                            sheet.cell(row=row_index, column=col_index).value = cell
+                        row_index += 1
+                    row_index += 1  # add blank line between tables
 
-        # Log output for debugging
-        print("STDOUT:", process.stdout)
-        print("STDERR:", process.stderr)
-
-        # If LibreOffice failed, show its error
-        if process.returncode != 0:
-            return JSONResponse(status_code=500, content={
-                "error": "Conversion failed",
-                "details": process.stderr
-            })
-
-        # If the converted file doesn’t exist
-        if not os.path.exists(output_path):
-            return JSONResponse(status_code=500, content={
-                "error": "Converted file not found",
-                "stdout": process.stdout,
-                "stderr": process.stderr
-            })
-
-        # Return the converted file
+        workbook.save(output_path)
         return FileResponse(output_path, filename=f"converted.{format}")
 
     except Exception as e:
