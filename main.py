@@ -1,67 +1,40 @@
+# main.py
+
 import os
-import shutil
-import subprocess
 import tempfile
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import FileResponse, PlainTextResponse
+from pathlib import Path
+from fastapi import FastAPI, File, UploadFile
+from fastapi.responses import FileResponse
 
-app = FastAPI(title="Bank Docs Converter", version="1.0")
+app = FastAPI()
 
-# Health check
-@app.get("/", response_class=PlainTextResponse)
+
+@app.get("/")
 def root():
-    return "OK"
+    return {"status": "OK", "message": "Bank Docs Converter is running"}
+
 
 @app.post("/convert")
 async def convert(pdf: UploadFile = File(...), format: str = "xlsx"):
-    # Accept only PDFs
-    if not pdf.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Please upload a PDF file.")
+    """
+    Upload a PDF bank statement and convert it to XLSX or CSV.
+    """
 
-    # Only allow xlsx or csv output
-    fmt = format.lower()
-    if fmt not in ("xlsx", "csv"):
-        raise HTTPException(status_code=400, detail="format must be 'xlsx' or 'csv'")
+    # Create a temporary working directory
+    temp_dir = Path(tempfile.mkdtemp())
+    input_path = temp_dir / "statement.pdf"
+    output_path = temp_dir / f"statement.{format}"
 
-    # Temporary working dir
-    workdir = tempfile.mkdtemp(prefix="convert_")
-    try:
-        in_path = os.path.join(workdir, pdf.filename)
-        with open(in_path, "wb") as f:
-            f.write(await pdf.read())
+    # Save uploaded PDF file
+    with open(input_path, "wb") as f:
+        f.write(await pdf.read())
 
-        # Convert with LibreOffice (headless)
-        # Note: LibreOffice writes output next to the input file
-        cmd = [
-            "soffice",
-            "--headless",
-            "--convert-to", fmt,
-            "--outdir", workdir,
-            in_path
-        ]
-        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        if proc.returncode != 0:
-            raise HTTPException(status_code=500, detail=f"Conversion failed: {proc.stderr or proc.stdout}")
+    # Run LibreOffice to convert the file
+    command = f"libreoffice --headless --convert-to {format} {input_path} --outdir {temp_dir}"
+    exit_code = os.system(command)
 
-        # Determine output filename
-        base = os.path.splitext(os.path.basename(in_path))[0]
-        out_path = os.path.join(workdir, f"{base}.{fmt}")
+    if exit_code != 0 or not output_path.exists():
+        return {"error": "Conversion failed. Please check your PDF file."}
 
-        if not os.path.exists(out_path):
-            # LibreOffice sometimes uppercases extension; fallback scan
-            candidates = [p for p in os.listdir(workdir) if p.startswith(base + ".")]
-            if candidates:
-                out_path = os.path.join(workdir, candidates[0])
-            else:
-                raise HTTPException(status_code=500, detail="Converted file not found.")
-
-        # Send file to client (then delete temp dir)
-        filename = os.path.basename(out_path)
-        return FileResponse(out_path, filename=filename, media_type="application/octet-stream")
-
-    finally:
-        # clean up after response is sent
-        try:
-            shutil.rmtree(workdir, ignore_errors=True)
-        except Exception:
-            pass
+    # Send converted file back to the user
+    return FileResponse(output_path, filename=f"converted.{format}")
