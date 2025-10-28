@@ -14,33 +14,41 @@ def root():
 @app.post("/convert")
 async def convert(pdf: UploadFile, format: str = "xlsx"):
     try:
-        # Create a stable temp directory
         tmp_dir = tempfile.mkdtemp()
         input_path = os.path.join(tmp_dir, pdf.filename)
         output_filename = os.path.splitext(pdf.filename)[0] + f".{format}"
         output_path = os.path.join(tmp_dir, output_filename)
 
-        # Save uploaded file
         with open(input_path, "wb") as f:
             f.write(await pdf.read())
 
-        # Parse PDF tables
-        tables = camelot.read_pdf(input_path, pages="all", flavor="stream")
+        # Try lattice first (for bordered tables)
+        tables = camelot.read_pdf(input_path, pages="all", flavor="lattice")
 
-        if not tables:
-            return JSONResponse(status_code=400, content={"error": "No tables detected. Try a clearer PDF."})
+        # Fallback to stream if lattice fails
+        if len(tables) == 0:
+            tables = camelot.read_pdf(input_path, pages="all", flavor="stream")
 
-        # Merge tables into one DataFrame
-        df = pd.concat([t.df for t in tables], ignore_index=True)
+        if len(tables) == 0:
+            return JSONResponse(status_code=400, content={"error": "No tables detected in PDF."})
 
-        # Write Excel safely
-        df.to_excel(output_path, index=False)
+        # Merge all tables
+        dfs = []
+        for t in tables:
+            df = t.df
+            # Clean up headers and empty columns
+            df.columns = [str(c).strip() for c in df.columns]
+            df = df.dropna(how="all", axis=1)
+            dfs.append(df)
 
-        # Confirm file exists and is valid before returning
+        merged_df = pd.concat(dfs, ignore_index=True)
+
+        # Export to Excel
+        merged_df.to_excel(output_path, index=False)
+
         if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-            return JSONResponse(status_code=500, content={"error": "Excel file not generated correctly."})
+            return JSONResponse(status_code=500, content={"error": "Excel file generation failed."})
 
-        # Return the file with correct headers
         return FileResponse(
             output_path,
             filename=output_filename,
