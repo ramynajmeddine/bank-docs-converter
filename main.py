@@ -1,50 +1,41 @@
-import pdfplumber
-import pandas as pd
+import os
 import tempfile
+import pandas as pd
+import camelot
 from fastapi import FastAPI, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
-import os
 
 app = FastAPI()
 
 @app.get("/")
 def root():
-    return {"status": "OK", "message": "Bank Docs Converter is running"}
+    return {"status": "OK", "message": "Bank Docs Converter is live"}
 
 @app.post("/convert")
 async def convert(pdf: UploadFile, format: str = "xlsx"):
     try:
-        # Temporary directory
-        with tempfile.TemporaryDirectory() as tmpdir:
-            input_path = os.path.join(tmpdir, "statement.pdf")
-            output_path = os.path.join(tmpdir, f"statement.{format}")
+        tmp_dir = tempfile.mkdtemp()
+        input_path = os.path.join(tmp_dir, "statement.pdf")
+        output_path = os.path.join(tmp_dir, f"statement.{format}")
 
-            # Save uploaded file
-            with open(input_path, "wb") as f:
-                f.write(await pdf.read())
+        with open(input_path, "wb") as f:
+            f.write(await pdf.read())
 
-            # Extract text from PDF
-            text_data = []
-            with pdfplumber.open(input_path) as pdf_doc:
-                for i, page in enumerate(pdf_doc.pages):
-                    text = page.extract_text()
-                    if text:
-                        lines = text.split("\n")
-                        for line in lines:
-                            text_data.append([i + 1, line])
+        # Extract tables using Camelot
+        tables = camelot.read_pdf(input_path, pages="all", flavor="stream")
 
-            # If no text found
-            if not text_data:
-                return JSONResponse(status_code=500, content={"error": "No text extracted from PDF"})
+        if len(tables) == 0:
+            return JSONResponse(status_code=400,
+                                 content={"error": "No tables detected. Try a clearer PDF scan."})
 
-            # Convert to DataFrame and save Excel
-            df = pd.DataFrame(text_data, columns=["Page", "Text"])
-            df.to_excel(output_path, index=False)
+        # Concatenate all tables
+        dfs = [t.df for t in tables]
+        df = pd.concat(dfs, ignore_index=True)
 
-            if not os.path.exists(output_path):
-                raise RuntimeError(f"Output file not found at {output_path}")
+        # Save to Excel
+        df.to_excel(output_path, index=False)
 
-            return FileResponse(output_path, filename=f"converted.{format}")
+        return FileResponse(output_path, filename=f"converted.{format}")
 
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
