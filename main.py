@@ -27,25 +27,30 @@ async def convert(pdf: UploadFile = File(...), format: str = "xlsx"):
         if os.system("which libreoffice") != 0:
             return JSONResponse(status_code=500, content={"error": "LibreOffice not found on system"})
 
-        # Convert the PDF using LibreOffice
-        command = [
-            "libreoffice", "--headless", "--convert-to", format,
-            str(input_path), "--outdir", str(temp_dir)
-        ]
+      # Convert the PDF using LibreOffice
+output_dir = "/app"
+command = [
+    "libreoffice",
+    "--headless",
+    "--convert-to", format,
+    "--outdir", output_dir,
+    str(input_path)
+]
 
-        process = subprocess.run(command, capture_output=True, text=True)
+process = subprocess.run(command, capture_output=True, text=True)
 
-        if process.returncode != 0:
-            return JSONResponse(status_code=500, content={
-                "error": "Conversion failed",
-                "details": process.stderr
-            })
+if process.returncode != 0:
+    return JSONResponse(status_code=500, content={
+        "error": "Conversion failed",
+        "details": process.stderr
+    })
 
-        if not output_path.exists():
-            return JSONResponse(status_code=500, content={"error": "Converted file not found"})
+# Determine converted file path inside /app
+converted_filename = f"{Path(input_path).stem}.{format}"
+converted_path = Path(output_dir) / converted_filename
 
-        # Return the converted file
-        return FileResponse(output_path, filename=f"converted.{format}")
+if not converted_path.exists():
+    return JSONResponse(status_code=500, content={"error": "Converted file not found"})
 
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+# Return the converted file
+return FileResponse(converted_path, filename=f"converted.{format}")
