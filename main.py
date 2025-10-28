@@ -66,4 +66,4 @@ async def convert_pdf_to_excel(
         )
 
     except Exception as e:
-        return {"error
+        return {"error": str(e)}
