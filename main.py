@@ -28,14 +28,14 @@ async def convert(pdf: UploadFile = File(...), format: str = "xlsx"):
             return JSONResponse(status_code=500, content={"error": "LibreOffice not found on system"})
 
       # Convert the PDF using LibreOffice
-output_dir = "/app"
-command = [
-    "libreoffice",
-    "--headless",
-    "--convert-to", format,
-    "--outdir", output_dir,
-    str(input_path)
-]
+      output_dir = "/app"
+      command = [
+          "libreoffice",
+          "--headless",
+          "--convert-to", format,
+          "--outdir", output_dir,
+          str(input_path)
+      ]
 
 process = subprocess.run(command, capture_output=True, text=True)
 
@@ -54,3 +54,4 @@ if not converted_path.exists():
 
 # Return the converted file
 return FileResponse(converted_path, filename=f"converted.{format}")
+
