@@ -1,76 +1,65 @@
-import os
-import tempfile
+from fastapi import FastAPI, File, UploadFile, Query
+from fastapi.responses import FileResponse, JSONResponse
 import pdfplumber
 import pandas as pd
-from fastapi import FastAPI, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+import os
+from pdf2image import convert_from_path
+import pytesseract
+from PIL import Image
 
 app = FastAPI()
 
 @app.get("/")
 def root():
-    return {"status": "OK", "message": "Bank Docs Converter (pdfplumber version) is running"}
+    return {"message": "PDF to Excel Converter API is running successfully."}
+
 
 @app.post("/convert")
-async def convert(pdf: UploadFile, format: str = "xlsx"):
-    import re
+async def convert_pdf_to_excel(
+    pdf: UploadFile = File(...),
+    format: str = Query("xlsx", enum=["xlsx"])
+):
     try:
-        tmp_dir = tempfile.mkdtemp()
-        input_path = os.path.join(tmp_dir, pdf.filename)
-        output_filename = os.path.splitext(pdf.filename)[0] + f".{format}"
-        output_path = os.path.join(tmp_dir, output_filename)
+        # Save uploaded PDF
+        input_path = f"/app/temp_{pdf.filename}"
+        output_path = input_path.replace(".pdf", f".{format}")
 
         with open(input_path, "wb") as f:
             f.write(await pdf.read())
 
-        # --- OCR phase ---
-        from pdf2image import convert_from_path
-        import pytesseract
+        extracted_text = []
 
-        images = convert_from_path(input_path)
-        all_text = []
-        for img in images:
-            page_text = pytesseract.image_to_string(img)
-            all_text.append(page_text)
-        text = "\n".join(all_text)
+        # Try reading as text-based PDF first
+        try:
+            with pdfplumber.open(input_path) as pdf_doc:
+                for i, page in enumerate(pdf_doc.pages, start=1):
+                    text = page.extract_text()
+                    if text:
+                        extracted_text.append({"page": i, "text": text.strip()})
+        except Exception as e:
+            print(f"pdfplumber failed: {e}")
 
-        # --- Parsing phase ---
-        lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+        # If no text found, fallback to OCR
+        if not extracted_text:
+            images = convert_from_path(input_path)
+            for i, img in enumerate(images, start=1):
+                text = pytesseract.image_to_string(img)
+                extracted_text.append({"page": i, "text": text.strip()})
 
-        # typical date formats: 01 Jan, 12/02, 12 Feb 2024 etc.
-        date_pattern = r"^(?:\d{1,2}[ /-](?:\d{1,2}|[A-Za-z]{3,9})(?:[ /-]\d{2,4})?)"
-        transactions = []
+        # Create a DataFrame
+        df = pd.DataFrame(extracted_text)
 
-        for line in lines:
-            if re.match(date_pattern, line):
-                parts = re.split(r"\s{2,}|\t", line)
-                date = parts[0]
-                if len(parts) > 2:
-                    desc = " ".join(parts[1:-1])
-                    amount = parts[-1]
-                elif len(parts) == 2:
-                    desc, amount = parts[1], ""
-                else:
-                    desc, amount = line, ""
-                transactions.append([date, desc, amount])
-
-        # fallback if nothing matched
-        if not transactions:
-            for line in lines:
-                tokens = line.split()
-                if tokens:
-                    transactions.append(tokens)
-
-        # --- Save to Excel ---
-        import pandas as pd
-        df = pd.DataFrame(transactions, columns=["Date", "Description", "Amount"])
+        # Write to Excel
         df.to_excel(output_path, index=False)
 
-        return FileResponse(
-            output_path,
-            filename=output_filename,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        # Clean up input file after conversion
+        os.remove(input_path)
+
+        # Return Excel file
+        return FileResponse(output_path, filename=os.path.basename(output_path))
 
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return JSONResponse(
+            status_code=500,
+            content={"error": f"Conversion failed: {str(e)}"}
+        )
