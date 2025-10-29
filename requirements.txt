@@ -2,6 +2,6 @@ fastapi
 uvicorn
 pandas
 openpyxl
-camelot-py[cv]
-ghostscript
+pdf2image
+pytesseract
 python-multipart
