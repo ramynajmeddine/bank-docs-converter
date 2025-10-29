@@ -5,6 +5,10 @@ import os
 from pdf2image import convert_from_path
 import pytesseract
 
+# ✅ ADD THESE TWO LINES RIGHT BELOW YOUR IMPORTS
+os.environ["PATH"] += os.pathsep + "/usr/bin"
+# (this makes sure pdf2image can find Poppler in the container)
+
 app = FastAPI()
 
 @app.get("/")
@@ -45,3 +49,4 @@ async def convert_pdf_to_excel(pdf: UploadFile = File(...)):
 
     except Exception as e:
         return {"error": str(e)}
+
